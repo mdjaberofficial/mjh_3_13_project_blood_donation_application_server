@@ -50,6 +50,34 @@ async function run() {
     // ==========================================
     // API ROUTES: USERS
     // ==========================================
+
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: SEARCH DONORS WITH FILTERS 👇
+    // -----------------------------------------------------------------
+
+    // GET: Search users by blood group, district, and upazila
+    app.get('/donor-search', async (req, res) => {
+      const { bloodGroup, district, upazila } = req.query;
+      
+      let query = { role: 'donor', status: 'active' }; // Only search active donors
+
+      if (bloodGroup && bloodGroup !== "") {
+        query.bloodGroup = bloodGroup;
+      }
+      if (district && district !== "") {
+        query.district = district;
+      }
+      if (upazila && upazila !== "") {
+        query.upazila = upazila;
+      }
+
+      const result = await usersCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
   
     // POST: Create a new user (Registration / Google Login)
     app.post('/users', async (req, res) => {
@@ -153,6 +181,32 @@ async function run() {
     // ==========================================
     // API ROUTES: DONATION REQUESTS 
     // ==========================================
+
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: CONFIRM DONATION (UPDATE STATUS & DONOR) 👇
+    // -----------------------------------------------------------------
+
+    // PATCH: Accept a donation request
+    app.patch('/donation-requests/accept/:id', async (req, res) => {
+      const id = req.params.id;
+      const { donorName, donorEmail } = req.body;
+      const query = { _id: new ObjectId(id) };
+      
+      const updateDoc = {
+        $set: {
+          donorName: donorName,
+          donorEmail: donorEmail,
+          status: 'inprogress' // Status changes as per requirements
+        }
+      };
+
+      const result = await donationRequestsCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
     
     // -----------------------------------------------------------------
     // 👇 NEW CHANGES: FETCH SINGLE REQUEST & UPDATE 👇
@@ -187,6 +241,21 @@ async function run() {
       };
 
       const result = await donationRequestsCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: FETCH PUBLIC PENDING REQUESTS 👇
+    // -----------------------------------------------------------------
+
+    // GET: Fetch all "pending" donation requests for public page
+    app.get('/public-donation-requests', async (req, res) => {
+      const query = { status: 'pending' };
+      const result = await donationRequestsCollection.find(query).sort({ _id: -1 }).toArray();
       res.send(result);
     });
 
