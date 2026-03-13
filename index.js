@@ -8,7 +8,9 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware
+// ==========================================
+// MIDDLEWARE CONFIGURATION
+// ==========================================
 app.use(cors());
 app.use(express.json()); // Parses incoming JSON requests
 
@@ -29,23 +31,25 @@ async function run() {
     // Connect the client to the server (optional starting in v4.7)
     // await client.connect();
     
-    // Database & Collections
+    // ==========================================
+    // DATABASE & COLLECTIONS SETUP
+    // ==========================================
     const db = client.db('bloodConnectDB');
     const usersCollection = db.collection('users');
     const donationRequestsCollection = db.collection('donationRequests');
     const blogsCollection = db.collection('blogs');
 
     // ==========================================
-    // Middlewares for JWT & Admin Verification
+    // JWT & ADMIN VERIFICATION MIDDLEWARES
     // ==========================================
     // We will build verifyToken and verifyAdmin here later
 
 
     // ==========================================
-    // API Routes go here
+    // API ROUTES: USERS
     // ==========================================
   
-    // --- USER API ---
+    // POST: Create a new user (Registration / Google Login)
     app.post('/users', async (req, res) => {
       const user = req.body;
       
@@ -60,7 +64,7 @@ async function run() {
       res.send(result);
     });
 
-    // Get user role by email
+    // GET: Fetch user role by email (For Role-Based Access Control)
     app.get('/users/role/:email', async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
@@ -73,7 +77,56 @@ async function run() {
       res.send({ role });
     });
 
-    // Basic root route for testing
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES ADDED BELOW: PROFILE FETCHING & UPDATING 👇
+    // -----------------------------------------------------------------
+
+    // GET: Fetch specific user details by email (For Dashboard Profile)
+    app.get('/users/:email', async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const result = await usersCollection.findOne(query);
+      res.send(result);
+    });
+
+    // PATCH: Update specific user profile details
+    app.patch('/users/:email', async (req, res) => {
+      const email = req.params.email;
+      const updatedData = req.body;
+      const query = { email: email };
+      
+      const updateDoc = {
+        $set: {
+          name: updatedData.name,
+          bloodGroup: updatedData.bloodGroup,
+          district: updatedData.district,
+          upazila: updatedData.upazila,
+          avatar: updatedData.avatar // Allows avatar updates if needed later
+        }
+      };
+      
+      const result = await usersCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
+
+
+    // ==========================================
+    // API ROUTES: DONATION REQUESTS (Coming Soon)
+    // ==========================================
+
+
+    // ==========================================
+    // API ROUTES: BLOGS (Coming Soon)
+    // ==========================================
+
+
+    // ==========================================
+    // ROOT SERVER ROUTE
+    // ==========================================
     app.get('/', (req, res) => {
       res.send('BloodConnect Server is running..');
     });
@@ -88,6 +141,9 @@ async function run() {
 }
 run().catch(console.dir);
 
+// ==========================================
+// START SERVER
+// ==========================================
 app.listen(port, () => {
   console.log(`BloodConnect is listening on port ${port}`);
 });
