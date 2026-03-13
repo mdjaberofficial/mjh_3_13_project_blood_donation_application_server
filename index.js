@@ -44,7 +44,22 @@ async function run() {
     // ==========================================
     // API Routes go here
     // ==========================================
-    
+  
+    // --- USER API ---
+    app.post('/users', async (req, res) => {
+      const user = req.body;
+      
+      // Check if user already exists in the database
+      const query = { email: user.email };
+      const existingUser = await usersCollection.findOne(query);
+      if (existingUser) {
+        return res.send({ message: 'User already exists', insertedId: null });
+      }
+
+      const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
+
     // Basic root route for testing
     app.get('/', (req, res) => {
       res.send('BloodConnect Server is running..');
