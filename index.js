@@ -115,8 +115,29 @@ async function run() {
 
 
     // ==========================================
-    // API ROUTES: DONATION REQUESTS (Coming Soon)
+    // API ROUTES: DONATION REQUESTS 
     // ==========================================
+
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: CREATE DONATION REQUEST 👇
+    // -----------------------------------------------------------------
+
+    // POST: Create a new blood donation request
+    app.post('/donation-requests', async (req, res) => {
+      const requestData = req.body;
+      
+      // Ensure the default status is 'pending' as per requirements
+      if (!requestData.status) {
+        requestData.status = 'pending';
+      }
+
+      const result = await donationRequestsCollection.insertOne(requestData);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
 
 
     // ==========================================
