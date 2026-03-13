@@ -15,7 +15,9 @@ app.use(cors());
 app.use(express.json()); // Parses incoming JSON requests
 
 // MongoDB Connection URI
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.mongodb.net/?retryWrites=true&w=majority`;
+
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.3l2kzzv.mongodb.net/bloodConnectDB?retryWrites=true&w=majority&authSource=admin`;
+
 
 // Create a MongoClient
 const client = new MongoClient(uri, {
@@ -63,7 +65,7 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
-    
+
     // -----------------------------------------------------------------
     // 👇 NEW CHANGES: ADMIN USER MANAGEMENT 👇
     // -----------------------------------------------------------------
@@ -152,6 +154,31 @@ async function run() {
     // API ROUTES: DONATION REQUESTS 
     // ==========================================
 
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: ADMIN/VOLUNTEER REQUEST MANAGEMENT 👇
+    // -----------------------------------------------------------------
+
+    // GET: Fetch all donation requests
+    app.get('/donation-requests', async (req, res) => {
+      // Sorting by newest first
+      const result = await donationRequestsCollection.find().sort({ _id: -1 }).toArray();
+      res.send(result);
+    });
+
+    // PATCH: Update donation request status
+    app.patch('/donation-requests/status/:id', async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { status: status } };
+      const result = await donationRequestsCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
+    
     // -----------------------------------------------------------------
     // 👇 NEW CHANGES: CREATE DONATION REQUEST 👇
     // -----------------------------------------------------------------
