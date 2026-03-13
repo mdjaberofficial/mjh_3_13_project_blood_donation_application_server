@@ -153,6 +153,46 @@ async function run() {
     // ==========================================
     // API ROUTES: DONATION REQUESTS 
     // ==========================================
+    
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: FETCH SINGLE REQUEST & UPDATE 👇
+    // -----------------------------------------------------------------
+
+    // GET: Fetch a single donation request by ID
+    app.get('/donation-requests/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await donationRequestsCollection.findOne(query);
+      res.send(result);
+    });
+
+    // PATCH: Update an existing donation request
+    app.patch('/donation-requests/update/:id', async (req, res) => {
+      const id = req.params.id;
+      const updatedData = req.body;
+      const query = { _id: new ObjectId(id) };
+      
+      const updateDoc = {
+        $set: {
+          recipientName: updatedData.recipientName,
+          recipientDistrict: updatedData.recipientDistrict,
+          recipientUpazila: updatedData.recipientUpazila,
+          hospitalName: updatedData.hospitalName,
+          fullAddress: updatedData.fullAddress,
+          bloodGroup: updatedData.bloodGroup,
+          donationDate: updatedData.donationDate,
+          donationTime: updatedData.donationTime,
+          requestMessage: updatedData.requestMessage,
+        }
+      };
+
+      const result = await donationRequestsCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
 
     // -----------------------------------------------------------------
     // 👇 NEW CHANGES: ADMIN/VOLUNTEER REQUEST MANAGEMENT 👇
@@ -178,7 +218,7 @@ async function run() {
     // -----------------------------------------------------------------
     // 👆 NEW CHANGES END HERE 👆
     // -----------------------------------------------------------------
-    
+
     // -----------------------------------------------------------------
     // 👇 NEW CHANGES: CREATE DONATION REQUEST 👇
     // -----------------------------------------------------------------
