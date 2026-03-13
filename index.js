@@ -60,6 +60,19 @@ async function run() {
       res.send(result);
     });
 
+    // Get user role by email
+    app.get('/users/role/:email', async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      
+      let role = 'donor'; // Fallback default
+      if (user?.role) {
+        role = user.role;
+      }
+      res.send({ role });
+    });
+
     // Basic root route for testing
     app.get('/', (req, res) => {
       res.send('BloodConnect Server is running..');
