@@ -139,6 +139,32 @@ async function run() {
     // 👆 NEW CHANGES END HERE 👆
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: MY DONATION REQUESTS (GET & DELETE) 👇
+    // -----------------------------------------------------------------
+
+    // GET: Fetch donation requests by requester email
+    app.get('/donation-requests/requester/:email', async (req, res) => {
+      const email = req.params.email;
+      const query = { requesterEmail: email };
+      // Sort by newest first (optional but good practice)
+      const result = await donationRequestsCollection.find(query).sort({ _id: -1 }).toArray();
+      res.send(result);
+    });
+
+    // DELETE: Remove a specific donation request
+    app.delete('/donation-requests/:id', async (req, res) => {
+      const id = req.params.id;
+      // We must use ObjectId to match MongoDB's _id format
+      const query = { _id: new ObjectId(id) };
+      const result = await donationRequestsCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
+
 
     // ==========================================
     // API ROUTES: BLOGS (Coming Soon)
