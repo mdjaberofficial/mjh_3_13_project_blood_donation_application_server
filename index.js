@@ -63,6 +63,40 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
+    
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: ADMIN USER MANAGEMENT 👇
+    // -----------------------------------------------------------------
+
+    // GET: Fetch all users (For Admin Dashboard)
+    app.get('/users', async (req, res) => {
+      const result = await usersCollection.find().toArray();
+      res.send(result);
+    });
+
+    // PATCH: Update user role (Admin / Volunteer / Donor)
+    app.patch('/users/role/:id', async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { role: role } };
+      const result = await usersCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // PATCH: Update user status (Active / Blocked)
+    app.patch('/users/status/:id', async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { status: status } };
+      const result = await usersCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
 
     // GET: Fetch user role by email (For Role-Based Access Control)
     app.get('/users/role/:email', async (req, res) => {
