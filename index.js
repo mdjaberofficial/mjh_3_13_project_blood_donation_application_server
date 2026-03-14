@@ -123,6 +123,40 @@ async function run() {
       const result = await usersCollection.updateOne(query, updateDoc);
       res.send(result);
     });
+    
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: ADMIN USER MANAGEMENT ROUTES 👇
+    // -----------------------------------------------------------------
+
+    // GET: Fetch all users (Admin only)
+    app.get('/all-users', async (req, res) => {
+      const result = await usersCollection.find().toArray();
+      res.send(result);
+    });
+
+    // PATCH: Update user role (Admin only)
+    app.patch('/users/update-role/:id', async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { role: role } };
+      const result = await usersCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
+    // PATCH: Block/Unblock user (Admin only)
+    app.patch('/users/update-status/:id', async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { status: status } };
+      const result = await usersCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
 
     // -----------------------------------------------------------------
     // 👆 NEW CHANGES END HERE 👆
@@ -170,6 +204,17 @@ async function run() {
       };
       
       const result = await usersCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: FEATURED DONORS (HOME PAGE) 👇
+    // -----------------------------------------------------------------
+
+    app.get('/featured-donors', async (req, res) => {
+      // Fetch 6 active donors, sorted by most recently joined
+      const query = { role: 'donor', status: 'active' };
+      const result = await usersCollection.find(query).limit(6).sort({ _id: -1 }).toArray();
       res.send(result);
     });
 
@@ -344,6 +389,31 @@ async function run() {
     // ==========================================
     // ROOT SERVER ROUTE
     // ==========================================
+
+    // -----------------------------------------------------------------
+    // 👇 NEW CHANGES: HOME PAGE STATISTICS 👇
+    // -----------------------------------------------------------------
+
+      app.get('/admin-stats', async (req, res) => {
+      const totalUsers = await usersCollection.estimatedDocumentCount();
+      const totalRequests = await donationRequestsCollection.estimatedDocumentCount();
+      const successfulDonations = await donationRequestsCollection.countDocuments({ status: 'done' });
+      
+      // NEW: Count unique districts where we have active users
+      const uniqueDistricts = await usersCollection.distinct("district", { status: 'active' });
+
+      res.send({
+        totalUsers,
+        totalRequests,
+        successfulDonations,
+        totalDistricts: uniqueDistricts.length // Send the count of unique locations
+      });
+    });
+
+    // -----------------------------------------------------------------
+    // 👆 NEW CHANGES END HERE 👆
+    // -----------------------------------------------------------------
+
     app.get('/', (req, res) => {
       res.send('BloodConnect Server is running..');
     });
