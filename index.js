@@ -2,8 +2,19 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-// const jwt = require('jsonwebtoken');
-// const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const jwt = require('jsonwebtoken');
+const admin = require('firebase-admin');
+
+// ==========================================
+// FIREBASE ADMIN SDK INITIALIZATION
+// ==========================================
+const serviceAccount = JSON.parse(
+    Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+);
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -12,425 +23,323 @@ const port = process.env.PORT || 3000;
 // MIDDLEWARE CONFIGURATION
 // ==========================================
 app.use(cors());
-app.use(express.json()); // Parses incoming JSON requests
-
-// MongoDB Connection URI
+app.use(express.json());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.3l2kzzv.mongodb.net/bloodConnectDB?retryWrites=true&w=majority&authSource=admin`;
 
-
-// Create a MongoClient
 const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  }
+    serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+    }
 });
 
 async function run() {
-  try {
-    // Connect the client to the server (optional starting in v4.7)
-    // await client.connect();
-    
-    // ==========================================
-    // DATABASE & COLLECTIONS SETUP
-    // ==========================================
-    const db = client.db('bloodConnectDB');
-    const usersCollection = db.collection('users');
-    const donationRequestsCollection = db.collection('donationRequests');
-    const blogsCollection = db.collection('blogs');
+    try {
+        const db = client.db('bloodConnectDB');
+        const usersCollection = db.collection('users');
+        const donationRequestsCollection = db.collection('donationRequests');
+        const blogsCollection = db.collection('blogs');
 
-    // ==========================================
-    // JWT & ADMIN VERIFICATION MIDDLEWARES
-    // ==========================================
-    // We will build verifyToken and verifyAdmin here later
+        // ==========================================
+        // JWT & VERIFICATION MIDDLEWARES
+        // ==========================================
 
+        app.post('/jwt', async (req, res) => {
+            const user = req.body;
+            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+            res.send({ token });
+        });
 
-    // ==========================================
-    // API ROUTES: USERS
-    // ==========================================
+        const verifyToken = (req, res, next) => {
+            if (!req.headers.authorization) {
+                return res.status(401).send({ message: 'unauthorized access' });
+            }
+            const token = req.headers.authorization.split(' ')[1];
+            jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+                if (err) {
+                    return res.status(401).send({ message: 'unauthorized access' });
+                }
+                req.decoded = decoded;
+                next();
+            });
+        };
 
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: SEARCH DONORS WITH FILTERS 👇
-    // -----------------------------------------------------------------
+        const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded?.email;
+            const user = await usersCollection.findOne({ email });
+            if (user?.role !== 'admin') {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+            next();
+        };
 
-    // GET: Search users by blood group, district, and upazila
-    app.get('/donor-search', async (req, res) => {
-      const { bloodGroup, district, upazila } = req.query;
-      
-      let query = { role: 'donor', status: 'active' }; // Only search active donors
+        const verifyStaff = async (req, res, next) => {
+            const email = req.decoded?.email;
+            const user = await usersCollection.findOne({ email });
+            const isStaff = user?.role === 'admin' || user?.role === 'volunteer';
+            if (!isStaff) {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+            next();
+        };
 
-      if (bloodGroup && bloodGroup !== "") {
-        query.bloodGroup = bloodGroup;
-      }
-      if (district && district !== "") {
-        query.district = district;
-      }
-      if (upazila && upazila !== "") {
-        query.upazila = upazila;
-      }
+        // ==========================================
+        // API ROUTES: USERS
+        // ==========================================
 
-      const result = await usersCollection.find(query).toArray();
-      res.send(result);
-    });
+        app.post('/users', async (req, res) => {
+            const user = req.body;
+            const existingUser = await usersCollection.findOne({ email: user.email });
+            if (existingUser) return res.send({ message: 'User exists', insertedId: null });
+            const result = await usersCollection.insertOne(user);
+            res.send(result);
+        });
 
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
-  
-    // POST: Create a new user (Registration / Google Login)
-    app.post('/users', async (req, res) => {
-      const user = req.body;
-      
-      // Check if user already exists in the database
-      const query = { email: user.email };
-      const existingUser = await usersCollection.findOne(query);
-      if (existingUser) {
-        return res.send({ message: 'User already exists', insertedId: null });
-      }
+        app.get('/all-users', verifyToken, verifyAdmin, async (req, res) => {
+            const result = await usersCollection.find().toArray();
+            res.send(result);
+        });
 
-      const result = await usersCollection.insertOne(user);
-      res.send(result);
-    });
+        app.get('/users/role/:email', async (req, res) => {
+            const user = await usersCollection.findOne({ email: req.params.email });
+            res.send({ role: user?.role || 'donor' });
+        });
 
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: ADMIN USER MANAGEMENT 👇
-    // -----------------------------------------------------------------
+        // ⭐ RESTORED: Fetch single user profile (For My Profile Page)
+        app.get('/users/:email', verifyToken, async (req, res) => {
+            const email = req.params.email;
+            if (email !== req.decoded?.email) {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+            const result = await usersCollection.findOne({ email });
+            res.send(result);
+        });
 
-    // GET: Fetch all users (For Admin Dashboard)
-    app.get('/users', async (req, res) => {
-      const result = await usersCollection.find().toArray();
-      res.send(result);
-    });
+        app.patch('/users/update-role/:id', verifyToken, verifyAdmin, async (req, res) => {
+            const result = await usersCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { role: req.body.role } }
+            );
+            res.send(result);
+        });
 
-    // PATCH: Update user role (Admin / Volunteer / Donor)
-    app.patch('/users/role/:id', async (req, res) => {
-      const id = req.params.id;
-      const { role } = req.body;
-      const query = { _id: new ObjectId(id) };
-      const updateDoc = { $set: { role: role } };
-      const result = await usersCollection.updateOne(query, updateDoc);
-      res.send(result);
-    });
+        app.patch('/users/update-status/:id', verifyToken, verifyAdmin, async (req, res) => {
+            const result = await usersCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { status: req.body.status } }
+            );
+            res.send(result);
+        });
 
-    // PATCH: Update user status (Active / Blocked)
-    app.patch('/users/status/:id', async (req, res) => {
-      const id = req.params.id;
-      const { status } = req.body;
-      const query = { _id: new ObjectId(id) };
-      const updateDoc = { $set: { status: status } };
-      const result = await usersCollection.updateOne(query, updateDoc);
-      res.send(result);
-    });
-    
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: ADMIN USER MANAGEMENT ROUTES 👇
-    // -----------------------------------------------------------------
+        // ==========================================
+        // API ROUTES: DONATION REQUESTS
+        // ==========================================
 
-    // GET: Fetch all users (Admin only)
-    app.get('/all-users', async (req, res) => {
-      const result = await usersCollection.find().toArray();
-      res.send(result);
-    });
+        app.get('/public-donation-requests', async (req, res) => {
+            const result = await donationRequestsCollection
+                .find({ status: 'pending' })
+                .sort({ _id: -1 })
+                .toArray();
+            res.send(result);
+        });
 
-    // PATCH: Update user role (Admin only)
-    app.patch('/users/update-role/:id', async (req, res) => {
-      const id = req.params.id;
-      const { role } = req.body;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = { $set: { role: role } };
-      const result = await usersCollection.updateOne(filter, updateDoc);
-      res.send(result);
-    });
+        app.get('/all-donation-requests', verifyToken, verifyStaff, async (req, res) => {
+            const result = await donationRequestsCollection.find().sort({ _id: -1 }).toArray();
+            res.send(result);
+        });
 
-    // PATCH: Block/Unblock user (Admin only)
-    app.patch('/users/update-status/:id', async (req, res) => {
-      const id = req.params.id;
-      const { status } = req.body;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = { $set: { status: status } };
-      const result = await usersCollection.updateOne(filter, updateDoc);
-      res.send(result);
-    });
+        // ⭐ RESTORED: Fetch requests created by a specific user (For Dashboard Page)
+        app.get('/donation-requests/requester/:email', verifyToken, async (req, res) => {
+            const email = req.params.email;
+            if (email !== req.decoded?.email) {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+            const result = await donationRequestsCollection
+                .find({ requesterEmail: email })
+                .sort({ _id: -1 })
+                .toArray();
+            res.send(result);
+        });
 
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
+        app.get('/donation-requests/:id', async (req, res) => {
+            const result = await donationRequestsCollection.findOne({ _id: new ObjectId(req.params.id) });
+            res.send(result);
+        });
 
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
+        app.patch('/donation-requests/accept/:id', verifyToken, async (req, res) => {
+            const result = await donationRequestsCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { 
+                    donorName: req.body.donorName, 
+                    donorEmail: req.body.donorEmail, 
+                    status: 'inprogress' 
+                } }
+            );
+            res.send(result);
+        });
 
-    // GET: Fetch user role by email (For Role-Based Access Control)
-    app.get('/users/role/:email', async (req, res) => {
-      const email = req.params.email;
-      const query = { email: email };
-      const user = await usersCollection.findOne(query);
-      
-      let role = 'donor'; // Fallback default
-      if (user?.role) {
-        role = user.role;
-      }
-      res.send({ role });
-    });
+        app.patch('/donation-requests/status/:id', verifyToken, verifyStaff, async (req, res) => {
+            const result = await donationRequestsCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { status: req.body.status } }
+            );
+            res.send(result);
+        });
 
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES ADDED BELOW: PROFILE FETCHING & UPDATING 👇
-    // -----------------------------------------------------------------
+        app.delete('/donation-requests/:id', verifyToken, verifyAdmin, async (req, res) => {
+            const result = await donationRequestsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+            res.send(result);
+        });
 
-    // GET: Fetch specific user details by email (For Dashboard Profile)
-    app.get('/users/:email', async (req, res) => {
-      const email = req.params.email;
-      const query = { email: email };
-      const result = await usersCollection.findOne(query);
-      res.send(result);
-    });
+        // ==========================================
+        // API ROUTES: BLOGS
+        // ==========================================
 
-    // PATCH: Update specific user profile details
-    app.patch('/users/:email', async (req, res) => {
-      const email = req.params.email;
-      const updatedData = req.body;
-      const query = { email: email };
-      
-      const updateDoc = {
-        $set: {
-          name: updatedData.name,
-          bloodGroup: updatedData.bloodGroup,
-          district: updatedData.district,
-          upazila: updatedData.upazila,
-          avatar: updatedData.avatar // Allows avatar updates if needed later
-        }
-      };
-      
-      const result = await usersCollection.updateOne(query, updateDoc);
-      res.send(result);
-    });
+        app.get('/all-blogs', verifyToken, verifyStaff, async (req, res) => {
+            const result = await blogsCollection.find().sort({ _id: -1 }).toArray();
+            res.send(result);
+        });
 
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: FEATURED DONORS (HOME PAGE) 👇
-    // -----------------------------------------------------------------
+        app.get('/blogs/:id', verifyToken, verifyStaff, async (req, res) => {
+            const result = await blogsCollection.findOne({ _id: new ObjectId(req.params.id) });
+            res.send(result);
+        });
 
-    app.get('/featured-donors', async (req, res) => {
-      // Fetch 6 active donors, sorted by most recently joined
-      const query = { role: 'donor', status: 'active' };
-      const result = await usersCollection.find(query).limit(6).sort({ _id: -1 }).toArray();
-      res.send(result);
-    });
+        app.patch('/blogs/:id', verifyToken, verifyStaff, async (req, res) => {
+            const result = await blogsCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { 
+                    title: req.body.title, 
+                    thumbnail: req.body.thumbnail, 
+                    content: req.body.content 
+                } }
+            );
+            res.send(result);
+        });
 
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
+        app.patch('/blogs/status/:id', verifyToken, verifyStaff, async (req, res) => {
+            const result = await blogsCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { status: req.body.status } }
+            );
+            res.send(result);
+        });
 
+        app.delete('/blogs/:id', verifyToken, verifyStaff, async (req, res) => {
+            const result = await blogsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+            res.send(result);
+        });
 
-    // ==========================================
-    // API ROUTES: DONATION REQUESTS 
-    // ==========================================
+        // ==========================================
+        // STATS
+        // ==========================================
 
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: CONFIRM DONATION (UPDATE STATUS & DONOR) 👇
-    // -----------------------------------------------------------------
+        // ==========================================
+        // USER / DONOR DASHBOARD ROUTES
+        // ==========================================
 
-    // PATCH: Accept a donation request
-    app.patch('/donation-requests/accept/:id', async (req, res) => {
-      const id = req.params.id;
-      const { donorName, donorEmail } = req.body;
-      const query = { _id: new ObjectId(id) };
-      
-      const updateDoc = {
-        $set: {
-          donorName: donorName,
-          donorEmail: donorEmail,
-          status: 'inprogress' // Status changes as per requirements
-        }
-      };
+        // 1. Fetch requests created by the logged-in user (My Requests)
+        app.get('/donation-requests/requester/:email', verifyToken, async (req, res) => {
+            const email = req.params.email;
+            // Security check
+            if (email !== req.decoded?.email) {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+            const result = await donationRequestsCollection
+                .find({ requesterEmail: email })
+                .sort({ _id: -1 })
+                .toArray();
+            res.send(result);
+        });
 
-      const result = await donationRequestsCollection.updateOne(query, updateDoc);
-      res.send(result);
-    });
+        // 2. Fetch requests the user has accepted as a donor (My Donations)
+        app.get('/my-donations/:email', verifyToken, async (req, res) => {
+            const email = req.params.email;
+            // Security check
+            if (email !== req.decoded?.email) {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+            const result = await donationRequestsCollection
+                .find({ donorEmail: email })
+                .sort({ _id: -1 })
+                .toArray();
+            res.send(result);
+        });
 
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
-    
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: FETCH SINGLE REQUEST & UPDATE 👇
-    // -----------------------------------------------------------------
+        // ==========================================
+        // STATS & DASHBOARD DATA
+        // ==========================================
 
-    // GET: Fetch a single donation request by ID
-    app.get('/donation-requests/:id', async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await donationRequestsCollection.findOne(query);
-      res.send(result);
-    });
+        
+        
+        // 1. Dashboard Charts & Summary (Staff/Admin)
+        app.get('/admin-dashboard-stats', verifyToken, verifyStaff, async (req, res) => {
+            try {
+                const bloodGroupData = await usersCollection.aggregate([
+                    { $group: { _id: "$bloodGroup", count: { $sum: 1 } } }
+                ]).toArray();
 
-    // PATCH: Update an existing donation request
-    app.patch('/donation-requests/update/:id', async (req, res) => {
-      const id = req.params.id;
-      const updatedData = req.body;
-      const query = { _id: new ObjectId(id) };
-      
-      const updateDoc = {
-        $set: {
-          recipientName: updatedData.recipientName,
-          recipientDistrict: updatedData.recipientDistrict,
-          recipientUpazila: updatedData.recipientUpazila,
-          hospitalName: updatedData.hospitalName,
-          fullAddress: updatedData.fullAddress,
-          bloodGroup: updatedData.bloodGroup,
-          donationDate: updatedData.donationDate,
-          donationTime: updatedData.donationTime,
-          requestMessage: updatedData.requestMessage,
-        }
-      };
+                const statusData = await donationRequestsCollection.aggregate([
+                    { $group: { _id: "$status", value: { $sum: 1 } } }
+                ]).toArray();
 
-      const result = await donationRequestsCollection.updateOne(query, updateDoc);
-      res.send(result);
-    });
+                const totalDonors = await usersCollection.countDocuments({ role: 'donor' });
+                const totalVolunteers = await usersCollection.countDocuments({ role: 'volunteer' });
+                const pendingRequests = await donationRequestsCollection.countDocuments({ status: 'pending' });
 
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
+                res.send({
+                    bloodGroupData: bloodGroupData.map(item => ({ name: item._id, count: item.count })),
+                    statusData: statusData.map(item => ({ name: item._id, value: item.value })),
+                    summary: { totalDonors, totalVolunteers, pendingRequests }
+                });
+            } catch (error) {
+                res.status(500).send({ message: "Failed to fetch dashboard stats" });
+            }
+        });
 
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: FETCH PUBLIC PENDING REQUESTS 👇
-    // -----------------------------------------------------------------
+        // 2. Public / General Admin Stats
+        app.get('/admin-stats', async (req, res) => {
+            const totalUsers = await usersCollection.estimatedDocumentCount();
+            const totalRequests = await donationRequestsCollection.estimatedDocumentCount();
+            const doneDonations = await donationRequestsCollection.countDocuments({ status: 'done' });
+            const districts = await usersCollection.distinct("district", { status: 'active' });
+            res.send({ totalUsers, totalRequests, doneDonations, totalDistricts: districts.length });
+        });
+        
+        app.get('/admin-stats', async (req, res) => {
+            const totalUsers = await usersCollection.estimatedDocumentCount();
+            const totalRequests = await donationRequestsCollection.estimatedDocumentCount();
+            const doneDonations = await donationRequestsCollection.countDocuments({ status: 'done' });
+            const districts = await usersCollection.distinct("district", { status: 'active' });
+            res.send({ totalUsers, totalRequests, doneDonations, totalDistricts: districts.length });
+        });
 
-    // GET: Fetch all "pending" donation requests for public page
-    app.get('/public-donation-requests', async (req, res) => {
-      const query = { status: 'pending' };
-      const result = await donationRequestsCollection.find(query).sort({ _id: -1 }).toArray();
-      res.send(result);
-    });
+        // ==========================================
+        // API ROUTES: BLOGS
+        // ==========================================
 
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
+        // ⭐ NEW: Public route to fetch only published blogs for the Navbar page
+        app.get('/published-blogs', async (req, res) => {
+            try {
+                const result = await blogsCollection
+                    .find({ status: 'published' })
+                    .sort({ _id: -1 })
+                    .toArray();
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: "Failed to fetch blogs" });
+            }
+        });
 
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: ADMIN/VOLUNTEER REQUEST MANAGEMENT 👇
-    // -----------------------------------------------------------------
+        // ... (keep your existing /all-blogs and other routes below this)
 
-    // GET: Fetch all donation requests
-    app.get('/donation-requests', async (req, res) => {
-      // Sorting by newest first
-      const result = await donationRequestsCollection.find().sort({ _id: -1 }).toArray();
-      res.send(result);
-    });
+        app.get('/', (req, res) => res.send('BloodConnect Server Active'));
 
-    // PATCH: Update donation request status
-    app.patch('/donation-requests/status/:id', async (req, res) => {
-      const id = req.params.id;
-      const { status } = req.body;
-      const query = { _id: new ObjectId(id) };
-      const updateDoc = { $set: { status: status } };
-      const result = await donationRequestsCollection.updateOne(query, updateDoc);
-      res.send(result);
-    });
-
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
-
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: CREATE DONATION REQUEST 👇
-    // -----------------------------------------------------------------
-
-    // POST: Create a new blood donation request
-    app.post('/donation-requests', async (req, res) => {
-      const requestData = req.body;
-      
-      // Ensure the default status is 'pending' as per requirements
-      if (!requestData.status) {
-        requestData.status = 'pending';
-      }
-
-      const result = await donationRequestsCollection.insertOne(requestData);
-      res.send(result);
-    });
-
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
-
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: MY DONATION REQUESTS (GET & DELETE) 👇
-    // -----------------------------------------------------------------
-
-    // GET: Fetch donation requests by requester email
-    app.get('/donation-requests/requester/:email', async (req, res) => {
-      const email = req.params.email;
-      const query = { requesterEmail: email };
-      // Sort by newest first (optional but good practice)
-      const result = await donationRequestsCollection.find(query).sort({ _id: -1 }).toArray();
-      res.send(result);
-    });
-
-    // DELETE: Remove a specific donation request
-    app.delete('/donation-requests/:id', async (req, res) => {
-      const id = req.params.id;
-      // We must use ObjectId to match MongoDB's _id format
-      const query = { _id: new ObjectId(id) };
-      const result = await donationRequestsCollection.deleteOne(query);
-      res.send(result);
-    });
-
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
-
-
-    // ==========================================
-    // API ROUTES: BLOGS (Coming Soon)
-    // ==========================================
-
-
-    // ==========================================
-    // ROOT SERVER ROUTE
-    // ==========================================
-
-    // -----------------------------------------------------------------
-    // 👇 NEW CHANGES: HOME PAGE STATISTICS 👇
-    // -----------------------------------------------------------------
-
-      app.get('/admin-stats', async (req, res) => {
-      const totalUsers = await usersCollection.estimatedDocumentCount();
-      const totalRequests = await donationRequestsCollection.estimatedDocumentCount();
-      const successfulDonations = await donationRequestsCollection.countDocuments({ status: 'done' });
-      
-      // NEW: Count unique districts where we have active users
-      const uniqueDistricts = await usersCollection.distinct("district", { status: 'active' });
-
-      res.send({
-        totalUsers,
-        totalRequests,
-        successfulDonations,
-        totalDistricts: uniqueDistricts.length // Send the count of unique locations
-      });
-    });
-
-    // -----------------------------------------------------------------
-    // 👆 NEW CHANGES END HERE 👆
-    // -----------------------------------------------------------------
-
-    app.get('/', (req, res) => {
-      res.send('BloodConnect Server is running..');
-    });
-
-    // Send a ping to confirm a successful connection
-    // await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
-  }
+        console.log("MongoDB Connected Successfully!");
+    } finally { }
 }
 run().catch(console.dir);
 
-// ==========================================
-// START SERVER
-// ==========================================
-app.listen(port, () => {
-  console.log(`BloodConnect is listening on port ${port}`);
-});
+app.listen(port, () => console.log(`Listening on port ${port}`));
